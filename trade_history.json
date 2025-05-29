@@ -6,5 +6,13 @@
     "orderSize": 1.0,
     "orderId": "4c1dac76-fd66-4371-930f-07ec1ada9987",
     "status": "success"
+  },
+  {
+    "timestamp": "2025-05-29T20:01:27.474880",
+    "symbol": "HOOD",
+    "action": "sell",
+    "orderSize": 2.0,
+    "orderId": "74d766db-6a35-4c67-ab4e-3e9b424e0e86",
+    "status": "success"
   }
 ]
