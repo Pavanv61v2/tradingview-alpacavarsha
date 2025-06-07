@@ -14,5 +14,20 @@
     "orderSize": 2.0,
     "orderId": "74d766db-6a35-4c67-ab4e-3e9b424e0e86",
     "status": "success"
+  },
+  {
+    "timestamp": "2025-06-07T08:10:28.356716",
+    "symbol": "SOL/USD",
+    "action": "sell",
+    "orderSize": 1,
+    "status": "failed",
+    "error": "insufficient balance for SOL (requested: 1, available: 0.9975)"
+  },
+  {
+    "timestamp": "2025-06-07T08:10:28.357043",
+    "symbol": "SOL/USD",
+    "action": "sell",
+    "status": "failed",
+    "error": "insufficient balance for SOL (requested: 1, available: 0.9975)"
   }
 ]
