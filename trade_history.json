@@ -29,5 +29,13 @@
     "action": "sell",
     "status": "failed",
     "error": "insufficient balance for SOL (requested: 1, available: 0.9975)"
+  },
+  {
+    "timestamp": "2025-07-01T20:01:24.005216",
+    "symbol": "HOOD",
+    "action": "sell",
+    "orderSize": 2.0,
+    "orderId": "782f7ae4-eece-440f-8851-bc02d21c939e",
+    "status": "success"
   }
 ]
