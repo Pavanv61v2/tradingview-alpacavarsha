@@ -60,5 +60,12 @@
     "timeInForce": "day",
     "orderId": "6550d4c9-38e9-48a3-a71c-d6a92a30f5fe",
     "status": "success"
+  },
+  {
+    "timestamp": "2025-11-06T11:13:08.323186",
+    "symbol": "TSLA",
+    "action": "sell",
+    "status": "skipped",
+    "note": "No available holdings to sell TSLA."
   }
 ]
