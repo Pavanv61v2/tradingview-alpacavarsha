@@ -341,16 +341,15 @@ jobs:
             });
             core.info(`Created issue #${issue.number}`);
 
-      # OPTIONAL: email if SMTP secrets exist
       - name: (Optional) Email trade confirmation
-        if: ${{ secrets.SMTP_SERVER != '' && secrets.SMTP_USERNAME != '' && secrets.SMTP_PASSWORD != '' && secrets.NOTIFICATION_EMAIL != '' }}
+        if: ${{ secrets.SMTP_SERVER && secrets.SMTP_USERNAME && secrets.SMTP_PASSWORD && secrets.NOTIFICATION_EMAIL }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_SERVER }}
           server_port: ${{ secrets.SMTP_PORT || 587 }}
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: Trade Confirmation
+          subject: ${{ format('Trade Confirmation:{0}', github.run_id)}}
           to: ${{ secrets.NOTIFICATION_EMAIL }}
           from: Alpaca Bot <${{ secrets.SMTP_USERNAME }}>
           content_type: text/plain
