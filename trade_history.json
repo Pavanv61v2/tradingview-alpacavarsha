@@ -67,5 +67,11 @@
     "action": "sell",
     "status": "skipped",
     "note": "No available holdings to sell TSLA."
+  },
+  {
+    "timestamp": "2025-11-06T11:16:07.264696",
+    "symbol": "TSLA",
+    "status": "failed",
+    "error": "insufficient buying power"
   }
 ]

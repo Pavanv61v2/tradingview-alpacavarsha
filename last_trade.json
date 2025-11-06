@@ -1,7 +1,6 @@
 {
-  "timestamp": "2025-11-06T11:13:08.323186",
+  "timestamp": "2025-11-06T11:16:07.264696",
   "symbol": "TSLA",
-  "action": "sell",
-  "status": "skipped",
-  "note": "No available holdings to sell TSLA."
+  "status": "failed",
+  "error": "insufficient buying power"
 }
