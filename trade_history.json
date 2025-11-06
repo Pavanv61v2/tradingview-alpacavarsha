@@ -46,5 +46,19 @@
     "limitPrice": null,
     "status": "failed",
     "error": "insufficient buying power"
+  },
+  {
+    "timestamp": "2025-11-06T10:15:01.442305",
+    "symbol": "TSLA",
+    "action": "buy",
+    "orderType": "market",
+    "limitPrice": null,
+    "qty": null,
+    "notional": 10.0,
+    "referencePriceUsed": null,
+    "fractionalRequested": true,
+    "timeInForce": "day",
+    "orderId": "6550d4c9-38e9-48a3-a71c-d6a92a30f5fe",
+    "status": "success"
   }
 ]
