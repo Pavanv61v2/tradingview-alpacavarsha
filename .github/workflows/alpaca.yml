@@ -12,7 +12,7 @@ jobs:
   place-order:
     runs-on: ubuntu-latest
 
-    # SMTP secrets at job level, so we can use env.* in if:
+    # SMTP secrets at job level so we can use env.* in if:
     env:
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -31,11 +31,11 @@ jobs:
 
       - name: Process Trading Signal
         env:
-          ALPACA_API_KEY: '${{ secrets.ALPACA_API_KEY }}'
-          ALPACA_API_SECRET: '${{ secrets.ALPACA_API_SECRET }}'
-          ALPACA_PAPER_TRADING: '${{ secrets.ALPACA_PAPER_TRADING }}'   # "true" or "false"
-          SIGNAL_DATA: '${{ toJson(github.event.client_payload) }}'
-          NOTIFICATION_EMAIL: '${{ secrets.NOTIFICATION_EMAIL }}'
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+          ALPACA_PAPER_TRADING: ${{ secrets.ALPACA_PAPER_TRADING }}   # "true" or "false"
+          SIGNAL_DATA: ${{ toJson(github.event.client_payload) }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
         run: |
           echo "Received trading signal"
           echo "Payload: ${{ toJson(github.event.client_payload) }}"
@@ -57,8 +57,10 @@ jobs:
                   arr = []
                   if os.path.exists(TRADE_LOG_FILE):
                       with open(TRADE_LOG_FILE, 'r') as f:
-                          try: arr = json.load(f)
-                          except json.JSONDecodeError: arr = []
+                          try:
+                              arr = json.load(f)
+                          except json.JSONDecodeError:
+                              arr = []
                   arr.append(tr)
                   with open(TRADE_LOG_FILE, 'w') as f:
                       json.dump(arr, f, indent=2)
@@ -69,29 +71,38 @@ jobs:
               try:
                   with open(RESULT_JSON, 'w') as f:
                       json.dump(tr, f, indent=2)
-                  md = []
-                  md.append(f"# Trade Confirmation")
-                  md.append("")
-                  md.append(f"**Time:** {tr.get('timestamp','')}")
-                  md.append(f"**Symbol:** {tr.get('symbol','')}")
-                  md.append(f"**Action:** {tr.get('action','')}")
-                  md.append(f"**Order Type:** {tr.get('orderType','')}")
+
+                  lines = []
+                  lines.append("# Trade Confirmation")
+                  lines.append("")
+                  lines.append(f"**Time:** {tr.get('timestamp','')}")
+                  if tr.get('symbol'):
+                      lines.append(f"**Symbol:** {tr.get('symbol')}")
+                  if tr.get('action'):
+                      lines.append(f"**Action:** {tr.get('action')}")
+                  if tr.get('orderType'):
+                      lines.append(f"**Order Type:** {tr.get('orderType')}")
+                  if tr.get('timeInForce'):
+                      lines.append(f"**Time in Force:** {tr.get('timeInForce')}")
+                  if tr.get('allowShort') is not None:
+                      lines.append(f"**Allow Short:** {tr.get('allowShort')}")
+                  if tr.get('fractionalRequested') is not None:
+                      lines.append(f"**Fractional Requested:** {tr.get('fractionalRequested')}")
                   if tr.get('qty') is not None:
-                      md.append(f"**Qty:** {tr.get('qty')}")
+                      lines.append(f"**Qty:** {tr.get('qty')}")
                   if tr.get('notional') is not None:
-                      md.append(f"**Notional:** ${tr.get('notional')}")
+                      lines.append(f"**Notional:** ${tr.get('notional')}")
                   if tr.get('limitPrice') is not None:
-                      md.append(f"**Limit Price:** {tr.get('limitPrice')}")
-                  md.append(f"**Time in Force:** {tr.get('timeInForce','')}")
-                  md.append(f"**Allow Short:** {tr.get('allowShort','')}")
-                  md.append(f"**Fractional Requested:** {tr.get('fractionalRequested','')}")
-                  md.append(f"**Order ID:** {tr.get('orderId','')}")
-                  md.append(f"**Status:** {tr.get('status','')}")
-                  if tr.get('note'):
-                      md.append("")
-                      md.append(f"**Note:** {tr.get('note')}")
+                      lines.append(f"**Limit Price:** {tr.get('limitPrice')}")
+                  if tr.get('orderId'):
+                      lines.append(f"**Order ID:** {tr.get('orderId')}")
+                  lines.append(f"**Status:** {tr.get('status','')}")
+                  if tr.get('error'):
+                      lines.append("")
+                      lines.append(f"**Error:** `{tr['error']}`")
+
                   with open(SUMMARY_MD, 'w') as f:
-                      f.write("\n".join(md) + "\n")
+                      f.write("\n\n".join(lines) + "\n")
               except Exception as e:
                   print(f"[SUMMARY] Failed to write summary files: {e}")
 
@@ -103,20 +114,27 @@ jobs:
               return None
 
           def _parse_float(v):
-              if v is None: return None
+              if v is None:
+                  return None
               s = str(v).replace(',', '').strip()
-              try: return float(s)
-              except (ValueError, TypeError): return None
+              try:
+                  return float(s)
+              except (ValueError, TypeError):
+                  return None
 
           def _parse_bool(v):
-              if v is None: return False
+              if v is None:
+                  return False
               return str(v).strip().lower() in ("1","true","yes","y","on")
 
           def _normalize_symbol(sym: str) -> str:
               s = sym.upper().replace(' ', '')
-              if '/' in s: return s
-              if s.endswith('USDT'): return s[:-4] + '/USD'
-              if s.endswith('USD'):  return s[:-3] + '/USD'
+              if '/' in s:
+                  return s
+              if s.endswith('USDT'):
+                  return s[:-4] + '/USD'
+              if s.endswith('USD'):
+                  return s[:-3] + '/USD'
               return s
 
           def _get_latest_trade_price(api, symbol: str):
@@ -143,7 +161,18 @@ jobs:
                   return 0.0
 
           def place_order():
-              note = None
+              # Predeclare for failure path
+              symbol = None
+              side = None
+              qty = None
+              notional = None
+              limit_price = None
+              fractional_flag = None
+              allow_short = None
+              is_crypto = None
+              order_type = None
+              params = {}
+
               try:
                   api_key = os.environ.get('ALPACA_API_KEY')
                   api_secret = os.environ.get('ALPACA_API_SECRET')
@@ -157,27 +186,27 @@ jobs:
                   signal = json.loads(raw)
                   print(f"[PAYLOAD] {signal}")
 
-                  symbol_raw = _first_present(signal, ['symbol','ticker'])
+                  symbol_raw = _first_present(signal, ['symbol', 'ticker'])
                   if not symbol_raw:
                       raise ValueError("No symbol")
                   symbol = _normalize_symbol(symbol_raw)
 
                   action = signal.get('action')
-                  if not action or str(action).lower() not in ('buy','sell'):
+                  if not action or str(action).lower() not in ('buy', 'sell'):
                       raise ValueError("Invalid action; expected buy/sell")
                   side = str(action).lower()
 
-                  qty_raw = _first_present(signal, ['order_size','qty','quantity'])
+                  qty_raw = _first_present(signal, ['order_size', 'qty', 'quantity'])
                   qty = _parse_float(qty_raw)
 
-                  notional_raw = _first_present(signal, ['notional','amount_usd','usd'])
+                  notional_raw = _first_present(signal, ['notional', 'amount_usd', 'usd'])
                   notional = _parse_float(notional_raw)
 
-                  price_raw = _first_present(signal, ['price','limit_price'])
+                  price_raw = _first_present(signal, ['price', 'limit_price'])
                   limit_price = _parse_float(price_raw)
 
-                  fractional_flag = _parse_bool(_first_present(signal, ['fractional','fractional_stock']))
-                  allow_short = _parse_bool(_first_present(signal, ['allow_short','short','can_short','shorting']))
+                  fractional_flag = _parse_bool(_first_present(signal, ['fractional', 'fractional_stock']))
+                  allow_short = _parse_bool(_first_present(signal, ['allow_short', 'short', 'can_short', 'shorting']))
 
                   base_url = 'https://paper-api.alpaca.markets' if paper else 'https://api.alpaca.markets'
                   api = tradeapi.REST(api_key, api_secret, base_url, api_version='v2')
@@ -186,7 +215,7 @@ jobs:
 
                   is_crypto = '/' in symbol
 
-                  # ---------- SELL AUTO-CAP ----------
+                  # --- SELL AUTO-CAP (when shorting disabled) ---
                   def cap_sell_qty(qty_in, notional_in):
                       avail = _get_available_qty(api, symbol)
                       if avail <= 0:
@@ -211,7 +240,6 @@ jobs:
                   params = {'symbol': symbol, 'side': side, 'time_in_force': 'gtc' if is_crypto else 'day'}
                   order_type = None
 
-                  # Auto-cap SELLs when shorting disabled
                   if side == 'sell' and not allow_short:
                       qty, _ = cap_sell_qty(qty, notional)
                       if qty <= 0:
@@ -221,6 +249,13 @@ jobs:
                               "timestamp": datetime.now().isoformat(),
                               "symbol": symbol,
                               "action": side,
+                              "orderType": "skip",
+                              "timeInForce": params.get("time_in_force"),
+                              "allowShort": allow_short,
+                              "fractionalRequested": fractional_flag,
+                              "qty": qty,
+                              "notional": notional,
+                              "limitPrice": limit_price,
                               "status": "skipped",
                               "note": note
                           }
@@ -228,7 +263,7 @@ jobs:
                           write_summaries(tr)
                           return tr
 
-                  # ---------- CRYPTO ----------
+                  # --- CRYPTO ---
                   if is_crypto:
                       if qty is None or qty <= 0:
                           raise ValueError("Crypto requires positive qty")
@@ -242,7 +277,7 @@ jobs:
                           order_type = 'market'
                       print(f"[CRYPTO] {order_type.upper()} {side} qty={qty}")
 
-                  # ---------- STOCKS ----------
+                  # --- STOCKS ---
                   else:
                       if fractional_flag and side == 'buy' and notional is None:
                           if qty is None or qty <= 0:
@@ -296,9 +331,19 @@ jobs:
 
               except Exception as e:
                   print(f"[ERROR] {e}")
+                  fallback_order_type = "limit" if (limit_price is not None and limit_price > 0) else "market"
+                  fallback_tif = params.get("time_in_force") or ("gtc" if is_crypto else ("day" if is_crypto is not None else None))
                   tr = {
                       "timestamp": datetime.now().isoformat(),
-                      "symbol": symbol if 'symbol' in locals() else 'UNKNOWN',
+                      "symbol": symbol if symbol else "UNKNOWN",
+                      "action": side,
+                      "qty": qty,
+                      "notional": notional,
+                      "limitPrice": limit_price,
+                      "orderType": order_type or fallback_order_type,
+                      "timeInForce": fallback_tif,
+                      "allowShort": allow_short,
+                      "fractionalRequested": fractional_flag,
                       "status": "failed",
                       "error": str(e)
                   }
@@ -325,7 +370,7 @@ jobs:
             echo "No summary found." >> $GITHUB_STEP_SUMMARY
           fi
 
-      # Build pretty HTML + subject as files (no heredocs/outputs yet)
+      # Build pretty HTML + subject as files (no heredocs to outputs)
       - name: Prepare email content files
         shell: bash
         run: |
@@ -339,8 +384,10 @@ jobs:
           jr = {}
           if os.path.exists(js_path):
               with open(js_path) as f:
-                  try: jr = json.load(f)
-                  except: jr = {}
+                  try:
+                      jr = json.load(f)
+                  except:
+                      jr = {}
 
           sym = jr.get('symbol', '—')
           act = (jr.get('action') or '—').upper()
@@ -368,9 +415,12 @@ jobs:
           <div class='footer'>GitHub Actions • Alpaca Bot</div>
           </div></body></html>"""
 
-          with open('email_subject.txt','w') as f: f.write(subject)
-          with open('email_text.txt','w') as f: f.write(text)
-          with open('email_html.html','w') as f: f.write(html_body)
+          with open('email_subject.txt','w') as f:
+              f.write(subject)
+          with open('email_text.txt','w') as f:
+              f.write(text)
+          with open('email_html.html','w') as f:
+              f.write(html_body)
           PY
 
       # Safely read files into outputs (handles multiline content)
