@@ -12,7 +12,7 @@ jobs:
   place-order:
     runs-on: ubuntu-latest
 
-    # Expose SMTP secrets as env so we can safely use env.* in if:
+    # Expose SMTP secrets at job level so we can use env.* in `if:`
     env:
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -40,7 +40,7 @@ jobs:
           echo "Received trading signal"
           echo "Payload: ${{ toJson(github.event.client_payload) }}"
 
-          # libs for trading + markdown rendering
+          # libs for trading + markdown rendering (markdown used later)
           pip install alpaca-trade-api requests markdown
 
           cat > trade.py << 'EOF'
@@ -325,8 +325,8 @@ jobs:
             echo "No summary found." >> $GITHUB_STEP_SUMMARY
           fi
 
+      # Build pretty HTML + subject and export as multiline env vars (robust)
       - name: Prepare email content (subject, text, html)
-        id: email_content
         shell: bash
         run: |
           python - <<'PY'
@@ -368,19 +368,22 @@ jobs:
           <div class='footer'>GitHub Actions • Alpaca Bot</div>
           </div></body></html>"""
 
-          # Write to files so the shell can safely emit outputs
           with open('email_subject.txt','w') as f: f.write(subject)
           with open('email_text.txt','w') as f: f.write(text)
           with open('email_html.html','w') as f: f.write(html_body)
           PY
 
-          echo "subject=$(cat email_subject.txt)" >> "$GITHUB_OUTPUT"
-          echo "text<<EOF" >> "$GITHUB_OUTPUT"
-          cat email_text.txt >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-          echo "html<<EOF" >> "$GITHUB_OUTPUT"
-          cat email_html.html >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "EMAIL_SUBJECT<<EOF"
+            cat email_subject.txt
+            echo "EOF"
+            echo "EMAIL_TEXT<<EOF"
+            cat email_text.txt
+            echo "EOF"
+            echo "EMAIL_HTML<<EOF"
+            cat email_html.html
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: (Optional) Email trade confirmation
         if: ${{ env.SMTP_SERVER && env.SMTP_USERNAME && env.SMTP_PASSWORD && env.NOTIFICATION_EMAIL }}
@@ -390,11 +393,11 @@ jobs:
           server_port: ${{ env.SMTP_PORT || 587 }}
           username: ${{ env.SMTP_USERNAME }}
           password: ${{ env.SMTP_PASSWORD }}
-          subject: ${{ steps.email_content.outputs.subject }}
+          subject: ${{ env.EMAIL_SUBJECT }}
           to: ${{ env.NOTIFICATION_EMAIL }}
           from: Alpaca Bot <${{ env.SMTP_USERNAME }}>
-          body: ${{ steps.email_content.outputs.text }}
-          html_body: ${{ steps.email_content.outputs.html }}
+          body: ${{ env.EMAIL_TEXT }}
+          html_body: ${{ env.EMAIL_HTML }}
 
       - name: Commit updated trade history
         run: |
