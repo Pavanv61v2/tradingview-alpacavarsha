@@ -13,7 +13,7 @@ jobs:
   place-order:
     runs-on: ubuntu-latest
 
-    # Expose SMTP secrets as env so we can safely use env.* in `if:` expressions
+    # Expose SMTP secrets as env so we can safely use env.* in if:
     env:
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -41,7 +41,8 @@ jobs:
           echo "Received trading signal"
           echo "Payload: ${{ toJson(github.event.client_payload) }}"
 
-          pip install alpaca-trade-api requests
+          # libs for trading + markdown rendering
+          pip install alpaca-trade-api requests markdown
 
           cat > trade.py << 'EOF'
           import os, json
@@ -325,29 +326,47 @@ jobs:
             echo "No summary found." >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Create Trade Confirmation Issue
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = 'last_trade_summary.md';
-            let body = 'No summary produced.';
-            if (fs.existsSync(path)) body = fs.readFileSync(path, 'utf8');
-            let title = 'Trade Confirmation';
-            try {
-              const jr = JSON.parse(fs.readFileSync('last_trade.json', 'utf8'));
-              const sym = jr.symbol || 'UNKNOWN';
-              const act = (jr.action || 'action').toUpperCase();
-              const t = jr.timestamp || new Date().toISOString();
-              title = `Trade Confirmation: ${sym} ${act} @ ${t}`;
-            } catch(e) {}
-            const {data: issue} = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title,
-              body
-            });
-            core.info(`Created issue #${issue.number}`);
+      # Build pretty HTML + subject from markdown + json
+      - name: Prepare email content (subject, text, html)
+        id: email_content
+        shell: bash
+        run: |
+          python - <<'PY' > email_outputs.txt
+          import os, json
+          from markdown import markdown
+
+          md_path = 'last_trade_summary.md'
+          js_path = 'last_trade.json'
+
+          # Subject
+          jr = {}
+          if os.path.exists(js_path):
+              with open(js_path) as f:
+                  try: jr = json.load(f)
+                  except: jr = {}
+          sym = jr.get('symbol','?')
+          act = (jr.get('action') or '').upper()
+          typ = jr.get('orderType','')
+          subject = f"✅ Trade: {sym} {act} ({typ})" if sym != '?' else "✅ Trade Confirmation"
+
+          # Bodies
+          text = "No summary available."
+          if os.path.exists(md_path):
+              with open(md_path, 'r') as f:
+                  text = f.read()
+          html = markdown(text, output_format='html5')
+
+          # Escape for GitHub outputs
+          def esc(s): 
+              return s.replace('%','%25').replace('\n','%0A').replace('\r','%0D')
+
+          print(f"subject={esc(subject)}")
+          print(f"text={esc(text)}")
+          print(f"html={esc(html)}")
+          PY
+
+          # Publish as step outputs
+          cat email_outputs.txt >> "$GITHUB_OUTPUT"
 
       - name: (Optional) Email trade confirmation
         if: ${{ env.SMTP_SERVER && env.SMTP_USERNAME && env.SMTP_PASSWORD && env.NOTIFICATION_EMAIL }}
@@ -357,12 +376,11 @@ jobs:
           server_port: ${{ env.SMTP_PORT || 587 }}
           username: ${{ env.SMTP_USERNAME }}
           password: ${{ env.SMTP_PASSWORD }}
-          subject: ${{ format('Trade Confirmation:{0}', github.run_id) }}
+          subject: ${{ steps.email_content.outputs.subject }}
           to: ${{ env.NOTIFICATION_EMAIL }}
           from: Alpaca Bot <${{ env.SMTP_USERNAME }}>
-          content_type: text/plain
-          body: |
-            $(cat last_trade_summary.md || echo "No summary available.")
+          body: ${{ steps.email_content.outputs.text }}
+          html_body: ${{ steps.email_content.outputs.html }}
 
       - name: Commit updated trade history
         run: |
