@@ -87,5 +87,11 @@
     "timeInForce": "day",
     "status": "success",
     "orderId": "c9384508-f2a3-4edd-ba2b-3b27333b18d3"
+  },
+  {
+    "timestamp": "2025-11-06T12:23:43.334398",
+    "symbol": "TSLA",
+    "status": "failed",
+    "error": "insufficient buying power"
   }
 ]
