@@ -12,7 +12,7 @@ jobs:
   place-order:
     runs-on: ubuntu-latest
 
-    # Expose SMTP secrets at job level so we can use env.* in `if:`
+    # SMTP secrets at job level, so we can use env.* in if:
     env:
       SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -40,7 +40,7 @@ jobs:
           echo "Received trading signal"
           echo "Payload: ${{ toJson(github.event.client_payload) }}"
 
-          # libs for trading + markdown rendering (markdown used later)
+          # Trading libs + markdown renderer for pretty emails
           pip install alpaca-trade-api requests markdown
 
           cat > trade.py << 'EOF'
@@ -325,8 +325,8 @@ jobs:
             echo "No summary found." >> $GITHUB_STEP_SUMMARY
           fi
 
-      # Build pretty HTML + subject and export as multiline env vars (robust)
-      - name: Prepare email content (subject, text, html)
+      # Build pretty HTML + subject as files (no heredocs/outputs yet)
+      - name: Prepare email content files
         shell: bash
         run: |
           python - <<'PY'
@@ -373,17 +373,24 @@ jobs:
           with open('email_html.html','w') as f: f.write(html_body)
           PY
 
-          {
-            echo "EMAIL_SUBJECT<<EOF"
-            cat email_subject.txt
-            echo "EOF"
-            echo "EMAIL_TEXT<<EOF"
-            cat email_text.txt
-            echo "EOF"
-            echo "EMAIL_HTML<<EOF"
-            cat email_html.html
-            echo "EOF"
-          } >> "$GITHUB_ENV"
+      # Safely read files into outputs (handles multiline content)
+      - name: Read subject
+        id: subj
+        uses: juliangruber/read-file-action@v1
+        with:
+          path: email_subject.txt
+
+      - name: Read text body
+        id: tbody
+        uses: juliangruber/read-file-action@v1
+        with:
+          path: email_text.txt
+
+      - name: Read HTML body
+        id: hbody
+        uses: juliangruber/read-file-action@v1
+        with:
+          path: email_html.html
 
       - name: (Optional) Email trade confirmation
         if: ${{ env.SMTP_SERVER && env.SMTP_USERNAME && env.SMTP_PASSWORD && env.NOTIFICATION_EMAIL }}
@@ -393,11 +400,11 @@ jobs:
           server_port: ${{ env.SMTP_PORT || 587 }}
           username: ${{ env.SMTP_USERNAME }}
           password: ${{ env.SMTP_PASSWORD }}
-          subject: ${{ env.EMAIL_SUBJECT }}
+          subject: ${{ steps.subj.outputs.content }}
           to: ${{ env.NOTIFICATION_EMAIL }}
           from: Alpaca Bot <${{ env.SMTP_USERNAME }}>
-          body: ${{ env.EMAIL_TEXT }}
-          html_body: ${{ env.EMAIL_HTML }}
+          body: ${{ steps.tbody.outputs.content }}
+          html_body: ${{ steps.hbody.outputs.content }}
 
       - name: Commit updated trade history
         run: |
