@@ -7,6 +7,7 @@ name: TradingView-Alpaca Bridge
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   place-order:
@@ -26,6 +27,7 @@ jobs:
           ALPACA_API_SECRET: '${{ secrets.ALPACA_API_SECRET }}'
           ALPACA_PAPER_TRADING: '${{ secrets.ALPACA_PAPER_TRADING }}'   # "true" or "false"
           SIGNAL_DATA: '${{ toJson(github.event.client_payload) }}'
+          NOTIFICATION_EMAIL: '${{ secrets.NOTIFICATION_EMAIL }}'
         run: |
           echo "Received trading signal"
           echo "Payload: ${{ toJson(github.event.client_payload) }}"
@@ -38,6 +40,8 @@ jobs:
           import alpaca_trade_api as tradeapi
 
           TRADE_LOG_FILE = 'trade_history.json'
+          SUMMARY_MD = 'last_trade_summary.md'
+          RESULT_JSON = 'last_trade.json'
 
           def log_trade(tr):
               try:
@@ -51,6 +55,37 @@ jobs:
                       json.dump(arr, f, indent=2)
               except Exception as e:
                   print(f"[LOG] Failed to write trade log: {e}")
+
+          def write_summaries(tr):
+              try:
+                  with open(RESULT_JSON, 'w') as f:
+                      json.dump(tr, f, indent=2)
+                  # markdown summary
+                  md = []
+                  md.append(f"# Trade Confirmation")
+                  md.append("")
+                  md.append(f"**Time:** {tr.get('timestamp','')}")
+                  md.append(f"**Symbol:** {tr.get('symbol','')}")
+                  md.append(f"**Action:** {tr.get('action','')}")
+                  md.append(f"**Order Type:** {tr.get('orderType','')}")
+                  if tr.get('qty') is not None:
+                      md.append(f"**Qty:** {tr.get('qty')}")
+                  if tr.get('notional') is not None:
+                      md.append(f"**Notional:** ${tr.get('notional')}")
+                  if tr.get('limitPrice') is not None:
+                      md.append(f"**Limit Price:** {tr.get('limitPrice')}")
+                  md.append(f"**Time in Force:** {tr.get('timeInForce','')}")
+                  md.append(f"**Allow Short:** {tr.get('allowShort','')}")
+                  md.append(f"**Fractional Requested:** {tr.get('fractionalRequested','')}")
+                  md.append(f"**Order ID:** {tr.get('orderId','')}")
+                  md.append(f"**Status:** {tr.get('status','')}")
+                  if tr.get('note'):
+                      md.append(f"")
+                      md.append(f"**Note:** {tr.get('note')}")
+                  with open(SUMMARY_MD, 'w') as f:
+                      f.write("\n".join(md) + "\n")
+              except Exception as e:
+                  print(f"[SUMMARY] Failed to write summary files: {e}")
 
           def _first_present(d, keys):
               for k in keys:
@@ -100,6 +135,7 @@ jobs:
                   return 0.0
 
           def place_order():
+              note = None
               try:
                   api_key = os.environ.get('ALPACA_API_KEY')
                   api_secret = os.environ.get('ALPACA_API_SECRET')
@@ -160,7 +196,6 @@ jobs:
                       if qty_in is None or qty_in <= 0:
                           print("[CAP] Invalid sell qty; skipping.")
                           return 0, None
-                          capped = min(qty_in, avail)
                       capped = min(qty_in, avail)
                       print(f"[CAP] SELL qty {qty_in:.6f}, avail {avail:.6f}, using {capped:.6f}")
                       return capped, None
@@ -168,12 +203,22 @@ jobs:
                   params = {'symbol': symbol, 'side': side, 'time_in_force': 'gtc' if is_crypto else 'day'}
                   order_type = None
 
-                  # Auto-cap SELLs
+                  # Auto-cap SELLs when shorting disabled
                   if side == 'sell' and not allow_short:
                       qty, _ = cap_sell_qty(qty, notional)
                       if qty <= 0:
-                          print(f"[SKIP] No available holdings to sell {symbol}.")
-                          return {"skipped": True, "reason": "No holdings"}
+                          note = f"No available holdings to sell {symbol}."
+                          print(f"[SKIP] {note}")
+                          tr = {
+                              "timestamp": datetime.now().isoformat(),
+                              "symbol": symbol,
+                              "action": side,
+                              "status": "skipped",
+                              "note": note
+                          }
+                          log_trade(tr)
+                          write_summaries(tr)
+                          return tr
 
                   # ---------- CRYPTO ----------
                   if is_crypto:
@@ -195,6 +240,8 @@ jobs:
                           if qty is None or qty <= 0:
                               raise ValueError("fractional=true requires qty")
                           ref_px = limit_price or _get_latest_trade_price(api, symbol)
+                          if not ref_px:
+                              raise ValueError("Missing reference price to compute notional")
                           notional = qty * ref_px
                           params['notional'] = notional
                           params['type'] = 'market'
@@ -206,6 +253,8 @@ jobs:
                           order_type = 'market'
                           print(f"[STOCK] Market notional ${notional}")
                       else:
+                          if qty is None or qty <= 0:
+                              raise ValueError("Stock orders require positive qty when notional is absent.")
                           params['qty'] = int(qty)
                           if limit_price:
                               params['type'] = 'limit'
@@ -219,7 +268,7 @@ jobs:
                   order = api.submit_order(**params)
                   print(f"[ORDER] {order.id} status={getattr(order, 'status', 'submitted')}")
 
-                  log_trade({
+                  tr = {
                       "timestamp": datetime.now().isoformat(),
                       "symbol": symbol,
                       "action": side,
@@ -229,15 +278,25 @@ jobs:
                       "orderType": order_type,
                       "allowShort": allow_short,
                       "fractionalRequested": fractional_flag,
+                      "timeInForce": params.get("time_in_force"),
                       "status": "success",
                       "orderId": order.id
-                  })
-                  return {"success": True}
+                  }
+                  log_trade(tr)
+                  write_summaries(tr)
+                  return tr
 
               except Exception as e:
                   print(f"[ERROR] {e}")
-                  log_trade({"timestamp": datetime.now().isoformat(), "symbol": symbol if 'symbol' in locals() else 'UNKNOWN', "status": "failed", "error": str(e)})
-                  return {"error": str(e)}
+                  tr = {
+                      "timestamp": datetime.now().isoformat(),
+                      "symbol": symbol if 'symbol' in locals() else 'UNKNOWN',
+                      "status": "failed",
+                      "error": str(e)
+                  }
+                  log_trade(tr)
+                  write_summaries(tr)
+                  return tr
 
           if __name__ == "__main__":
               res = place_order()
@@ -249,13 +308,62 @@ jobs:
           echo "Files in directory after script execution:"
           ls -la
 
+      - name: Add trade summary to GitHub Job Summary
+        run: |
+          if [ -f "last_trade_summary.md" ]; then
+            echo "## Trade Confirmation" >> $GITHUB_STEP_SUMMARY
+            cat last_trade_summary.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No summary found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Create Trade Confirmation Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'last_trade_summary.md';
+            let body = 'No summary produced.';
+            if (fs.existsSync(path)) body = fs.readFileSync(path, 'utf8');
+            let title = 'Trade Confirmation';
+            try {
+              const jr = JSON.parse(fs.readFileSync('last_trade.json', 'utf8'));
+              const sym = jr.symbol || 'UNKNOWN';
+              const act = (jr.action || 'action').toUpperCase();
+              const t = jr.timestamp || new Date().toISOString();
+              title = `Trade Confirmation: ${sym} ${act} @ ${t}`;
+            } catch(e) {}
+            const {data: issue} = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
+            core.info(`Created issue #${issue.number}`);
+
+      # OPTIONAL: email if SMTP secrets exist
+      - name: (Optional) Email trade confirmation
+        if: ${{ secrets.SMTP_SERVER != '' && secrets.SMTP_USERNAME != '' && secrets.SMTP_PASSWORD != '' && secrets.NOTIFICATION_EMAIL != '' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT || 587 }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Trade Confirmation
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: Alpaca Bot <${{ secrets.SMTP_USERNAME }}>
+          content_type: text/plain
+          body: |
+            $(cat last_trade_summary.md || echo "No summary available.")
+
       - name: Commit updated trade history
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           if [ -f "trade_history.json" ]; then
-            git add trade_history.json
-            git commit -m "Update trade history [skip ci]" || echo "No changes to commit"
+            git add trade_history.json last_trade_summary.md last_trade.json || true
+            git commit -m "Update trade history & summary [skip ci]" || echo "No changes to commit"
             git push || echo "Failed to push changes"
           else
             echo "trade_history.json not found"
