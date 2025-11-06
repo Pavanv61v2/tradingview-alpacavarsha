@@ -12,6 +12,15 @@ permissions:
 jobs:
   place-order:
     runs-on: ubuntu-latest
+
+    # Expose SMTP secrets as env so we can safely use env.* in `if:` expressions
+    env:
+      SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -60,7 +69,6 @@ jobs:
               try:
                   with open(RESULT_JSON, 'w') as f:
                       json.dump(tr, f, indent=2)
-                  # markdown summary
                   md = []
                   md.append(f"# Trade Confirmation")
                   md.append("")
@@ -80,7 +88,7 @@ jobs:
                   md.append(f"**Order ID:** {tr.get('orderId','')}")
                   md.append(f"**Status:** {tr.get('status','')}")
                   if tr.get('note'):
-                      md.append(f"")
+                      md.append("")
                       md.append(f"**Note:** {tr.get('note')}")
                   with open(SUMMARY_MD, 'w') as f:
                       f.write("\n".join(md) + "\n")
@@ -342,16 +350,16 @@ jobs:
             core.info(`Created issue #${issue.number}`);
 
       - name: (Optional) Email trade confirmation
-        if: ${{ secrets.SMTP_SERVER && secrets.SMTP_USERNAME && secrets.SMTP_PASSWORD && secrets.NOTIFICATION_EMAIL }}
+        if: ${{ env.SMTP_SERVER && env.SMTP_USERNAME && env.SMTP_PASSWORD && env.NOTIFICATION_EMAIL }}
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT || 587 }}
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
-          subject: ${{ format('Trade Confirmation:{0}', github.run_id)}}
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: Alpaca Bot <${{ secrets.SMTP_USERNAME }}>
+          server_address: ${{ env.SMTP_SERVER }}
+          server_port: ${{ env.SMTP_PORT || 587 }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
+          subject: ${{ format('Trade Confirmation:{0}', github.run_id) }}
+          to: ${{ env.NOTIFICATION_EMAIL }}
+          from: Alpaca Bot <${{ env.SMTP_USERNAME }}>
           content_type: text/plain
           body: |
             $(cat last_trade_summary.md || echo "No summary available.")
